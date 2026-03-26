@@ -1,98 +1,93 @@
-import { useState, useEffect } from 'react'
-import  Search  from './components/Search'
-import Spinner from './components/Spinner'
-import MovieCard from './components/MovieCard'
-import { useDebounce } from 'react-use'
-import { getTrendingMovies, updateSearchCount } from './appwrite'
-// import { updateSearchCount } from './appwrite'
+import { useState, useEffect } from 'react';
+import Search from './components/Search';
+import Spinner from './components/Spinner';
+import MovieCard from './components/MovieCard';
+import { useDebounce } from 'react-use';
 
-//To get Web base URL 
-const API_BASE_URL = 'https://api.themoviedb.org/3'
+import { db, collection, addDoc } from './firebase'; // Firebase integration
 
-//To import the API KEY from the .env.local file
-const API_KEY = import.meta.env.VITE_TMDB_API_KEY
+// TMDB API base and v3 key
+const API_BASE_URL = 'https://api.themoviedb.org/3';
+const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 
-// Define the API options
-const API_OPTIONS = {
-  method: 'GET',
-  headers: {
-    accept: 'application/json',
-    Authorization: `Bearer ${API_KEY}`
-  }
-}
+console.log('API_KEY:', API_KEY);
 
-// API - Application Programming Interface - a set of rules that allows one software application to talk to another
 const App = () => {
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [movieList, setMovieList] = useState([]);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [trendingMovies, setTrendingMovies] = useState([]);
 
-  const [movieList, setMovieList] = useState([])
-  const [errorMessage, setErrorMessage] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+  // Debounce search term to reduce API calls
+  useDebounce(() => setDebouncedSearchTerm(searchTerm), 500, [searchTerm]);
 
-  const [trendingMovies, setTrendingMovies] = useState([])
-  
+  // Save search history to Firebase Firestore
+  const saveSearchToFirebase = async (query, movie) => {
+    try {
+      await addDoc(collection(db, "searches"), {
+        query,
+        movieTitle: movie.title,
+        timestamp: new Date()
+      });
+    } catch (err) {
+      console.error("Error saving search:", err);
+    }
+  };
 
-  // Debounce the search term to prevent making too many API requests by waiting for the user to stop typing for 500ms
-  useDebounce(() => setDebouncedSearchTerm(searchTerm), 500, [searchTerm]) // A callback function
-
+  // Fetch movies from TMDB (search or popular)
   const fetchMovies = async (query = '') => {
-    setIsLoading(true)
-    setErrorMessage('')
+  setIsLoading(true);
+  setErrorMessage('');
 
-    try {
-      const endpoint = query
-      ? `${API_BASE_URL}/search/movie?query=${encodeURIComponent(query)}`
-      : `${API_BASE_URL}/discover/movie?sort_by=popularity.desc`;
+  try {
+    const endpoint = query
+      ? `${API_BASE_URL}/search/movie?query=${encodeURIComponent(query)}&api_key=${API_KEY}`
+      : `${API_BASE_URL}/discover/movie?sort_by=popularity.desc&api_key=${API_KEY}`;
 
+      console.log('Fetching endpoint:', endpoint);
+      const response = await fetch(endpoint);
+      console.log('Response status:', response.status);
+      if (!response.ok) throw new Error('Failed to fetch movies');
 
-      const response = await fetch(endpoint, API_OPTIONS)
-
-      if(!response.ok) {
-        throw new Error('Failed to fetch movies')
-      }
-
-      const data = await response.json()
-      
-      if (data.response === 'False') {
-        setErrorMessage(data.Error || 'Failed to fetch movies')
-        setMovieList([])
-        return;
-      }
-      setMovieList(data.results || [])
-
-      if(query && data.results.length > 0) {
-        await updateSearchCount(query, data.results[0])
-      }
+      const data = await response.json();
+      setMovieList(data.results || []);
     } catch (error) {
-      console.log(`Error fetching movies: ${error}`)
-      setErrorMessage('Error fetching movies. Please try again later.')
+      console.error('Error fetching movies:', error);
+      setErrorMessage('Error fetching movies. Please try again later.');
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
+
+  // Load trending movies from TMDB
   const loadTrendingMovies = async () => {
-    try {
-      const movies = await getTrendingMovies()
+  try {
+      const endpoint = `${API_BASE_URL}/trending/movie/week?api_key=${API_KEY}`;
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error('Failed to fetch trending movies');
 
-      setTrendingMovies(movies)
-    } catch(error) {
-      console.log(`Error fetching trending movies: ${error}`)
+      const data = await response.json();
+      setTrendingMovies(data.results || []);
+        console.log('Movies fetched:', data.results)
+    } catch (error) {
+      console.error(error);
     }
-  }
+    
+  };
 
   useEffect(() => {
-    fetchMovies(debouncedSearchTerm)
-  }, [debouncedSearchTerm])
+    fetchMovies(debouncedSearchTerm);
+  }, [debouncedSearchTerm]);
 
   useEffect(() => {
-    loadTrendingMovies()
-  }, [])
+    loadTrendingMovies();
+  }, []);
 
   return (
     <main>
-
       <div className='pattern' />
 
       <div className='wrapper'>
@@ -100,19 +95,18 @@ const App = () => {
           <img src="./hero.png" alt="Hero Banner" />
           <h1>Find <span className='text-gradient'>Movies</span> You'll Enjoy Without the Hassle</h1>
 
-          <Search searchTerm = {searchTerm} setSearchTerm = {setSearchTerm}/>
-          {/* <h1 className='text-white'>{searchTerm}</h1> */}
+          <Search searchTerm={searchTerm} setSearchTerm={setSearchTerm} />
         </header>
 
         {trendingMovies.length > 0 && (
           <section className='trending'>
-            <h2>Trending Moves</h2>
-
+            <h2>Trending Movies</h2>
             <ul>
               {trendingMovies.map((movie, index) => (
-                <li key={movie.$id}>
+                <li key={movie.id}>
                   <p>{index + 1}</p>
-                  <img src={movie.poster_url} alt={movie.title} />
+                  <img src={`https://image.tmdb.org/t/p/w200${movie.poster_path}`} alt={movie.title} />
+                  <p>{movie.title}</p>
                 </li>
               ))}
             </ul>
@@ -121,7 +115,6 @@ const App = () => {
 
         <section className='all-movies'>
           <h2>All Movies</h2>
-
           {isLoading ? (
             <Spinner />
           ) : errorMessage ? (
@@ -134,12 +127,9 @@ const App = () => {
             </ul>
           )}
         </section>
-
       </div>
     </main>
-  )
-}
+  );
+};
 
-export default App
-
-//Props can take as inputs that you pass into a component like Arguments for a function or settings you pass to a component so it works properly
+export default App;
